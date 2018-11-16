@@ -937,7 +937,9 @@ ListNode.child = [AnchorNode, IconNode] # or CDataNode
 
 if __name__ == '__main__':
     myname_ = os.path.basename(__file__)
-
+    
+    # get given setting_file. if not given,
+    # 'setting.json' will be used.
     for arg in sys.argv:
         if not arg.endswith(myname_):
             file_ = arg
