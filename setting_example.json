@@ -1,0 +1,19 @@
+{
+    "site_name": "YOUR SITE NAME",
+    "src_root": "./src",
+    "out_root": "./out",
+    "db_file": "static_site.sq3",
+    "img_max_length": 1280,
+    "ignore_files": ["_name"],
+    "templates": [
+        "document": "./templates/document.html"
+        "index": "./templates/index.html"
+    ],
+    "server_info": {
+        "port": 21,
+        "address": "ftp.address.of.your.site",
+        "username": "USERNAME",
+        "password": "PASSWORD",
+        "working_directory": "/public_html"
+    }
+}

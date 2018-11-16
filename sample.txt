@@ -1,0 +1,37 @@
+# H1要素
+## H2要素
+### H3要素
+#### H4要素
+##### H5要素
+###### H6要素
+
+普通のP要素。単純に(*:実際には困る)。
+
+- list A
+- list B
+- List C
+    - SUB LIST
+    - SUB LIST
+        - 日本語
+- 一気に二段階戻る
+    + foo
+    + foobar
+      - aaa
+      - bbb
+
+img:res/nikki/2018/10/001.jpg(画像のキャプションです)
+
+img:res/nikki/2018/10/001.jpg
+
+<from: https://twitter.com
+ツイ〜トを引用します。
+>
+
+<from: サン・テグジュペリ『人間の土地』より
+どうやら完璧というものは、そこに付け足すものがなくなった時ではなく、そこから差し引くものがなくなった時にこそ、達成されるらしい。
+- list
+- list
+- list
+    - listlist
+    - listlist
+>
