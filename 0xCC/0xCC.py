@@ -85,9 +85,9 @@ class SiteBuilder:
                 # copy others
                 self.make_out_dir(t)
                 if t.endswith(('.jpg', '.jpeg')):
-                    self.im.do_resize(
+                    im.do_resize(
                         self.setting['src_root'] + t,
-                        self.setting['src_root'] + t)
+                        self.setting['out_root'] + t)
                 else:
                     self.copy_to_out_dir(t)
                     if os.path.basename(t).startswith('_'):
@@ -540,13 +540,29 @@ class ContextManager:
 
 
 #
-# txt2html compiler "TACHYON"
+# txt2html compiler
 #
 class Node:
     depth = 0
     indent = ' '
     context = None
     child = []
+    
+    def build_tag(self, tag_name, empty_element=False,
+                attributes=None, open=True, close=False):
+        if close:
+            tag_ = f'</{tag_name}>'
+            return tag_
+        elif open:
+            tag_ = f'<{tag_name}'
+            
+        if attributes:
+            for key, value in attributes.items():
+                tag_ += f' {key}="{value}"'
+        if empty_element:
+            tag_ += ' /'
+        tag_ += '>'
+        return tag_
 
     def find_inline_child(self, txt):
         for c in self.child:
@@ -612,18 +628,19 @@ class HeaderNode(Node):
         line = self.context.source.pop(0)
         symbol, txt = self.pattern.search(line).groups()
         lv = len(symbol)
-        tag = f'h{lv}' # h1~h6
         c = self.context.counter('AutoToc')
-        self.context.output(f'<{tag} id="{self.id_prefix}{c:03}">', newline=True)
+        
+        tag_name = f'h{lv}' # h1~h6
+        attr = {'id': f'{self.id_prefix}{c:03}'}
+        tag = self.build_tag(tag_name=tag_name, attributes=attr)
+        self.context.output(tag, newline=True)
         if lv > 1:
-            self.context.output(f'<a href="#{self.id_prefix}{c:03}">')
+            txt = f'<{txt} → #{self.id_prefix}{c:03}>'
+            i_ = self.context.indent_str * lv
+            tocline_ = f'{i_} - {txt}\n'
+            self.context.toc_buffer += tocline_
         self.find_inline_child(txt)
-        if lv > 1:
-            self.context.output('</a>')
-        self.context.output(f'</{tag}>')
-        if lv > 1:
-            indent_ = self.context.indent_str * lv
-            self.context.toc_buffer += f'{indent_} - <{txt} → #{self.id_prefix}{c:03}>\n'
+        self.context.output(self.build_tag(tag_name=tag_name, close=True))
 
 
 class PNode(Node):
@@ -632,9 +649,12 @@ class PNode(Node):
 
     def parse(self):
         txt = self.context.source.pop(0)
-        self.context.output('<p>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='p'),
+            newline=True)
         self.find_inline_child(txt)
-        self.context.output('</p>')
+        self.context.output(
+            self.build_tag(tag_name='p', close=True))
 
 
 class ListNode(Node):
@@ -645,42 +665,68 @@ class ListNode(Node):
     def parse(self):
         # Detect list type (ul/ol)
         txt = self.context.source[0]
-        tag = 'ul' if self.pattern.search(txt).groups()[1] == '-' else 'ol'
-        self.context.output(f'<{tag}>', newline=True)
+        symbol_ = self.pattern.search(txt).groups()[1]
+        tag_name = 'ul' if symbol_ == '-' else 'ol'
+        tag = self.build_tag(tag_name)
+        self.context.output(tag, newline=True)
         self.context.indent()
         read_ahead = True
         while self.pattern.search(self.context.source[0]):
-            indent, symbol, txt = self.pattern.search(self.context.source.pop(0)).groups()
+            grps = self.pattern.search(
+                    self.context.source.pop(0)).groups()
+            indent, symbol, txt = grps
             depth = len(indent)
             txt = txt.strip()
-            self.context.output('<li>', newline=True)
+            li = self.build_tag(tag_name='li')
+            self.context.output(
+                self.build_tag(tag_name='li'),
+                newline=True)
             self.find_inline_child(txt)
             # case0: end of source
             #   -> close LI, get out from loop.
             if len(self.context.source) == 0:
-                self.context.output('</li>')
+                self.context.output(
+                    self.build_tag(
+                        tag_name='li',
+                        close=True))
                 break
+            else:
+                is_list = self.is_list(self.context.source[0])
+                if is_list:
+                    depth_ = self.check_indent(self.context.source[0])
             # case1: next line is in same indent
             #   -> just close LI, then continue this loop
-            if self.is_list(self.context.source[0]) and self.check_indent(self.context.source[0]) == depth:
-                self.context.output('</li>')
+            if (is_list and depth_ == depth):
+                self.context.output(
+                    self.build_tag(
+                        tag_name='li',
+                        close=True))
                 read_ahead = True
                 continue
             # case2: next line is more deep indent
             #   -> make ListNode and parse. After that, close LI.
-            elif self.is_list(self.context.source[0]) and self.check_indent(self.context.source[0]) > depth:
+            elif (is_list and depth_ > depth):
                 self.context.indent()
                 node = ListNode(self.context)
                 node.parse()
                 self.context.dedent()
-                self.context.output('</li>', newline=True)
+                self.context.output(
+                    self.build_tag(
+                        tag_name='li',
+                        close=True),
+                    newline=True)
             # case3: next line is not list
             #   -> close LI, then get out from loop
             else:
-                self.context.output('</li>')
+                self.context.output(
+                    self.build_tag(
+                        tag_name='li',
+                        close=True))
                 break
         self.context.dedent()
-        self.context.output(f'</{tag}>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name=tag_name, close=True),
+            newline=True)
 
     def is_list(self, text):
         return self.pattern.match(text)
@@ -700,17 +746,36 @@ class ImgNode(Node):
     def parse(self):
         line = self.context.source.pop(0)
         img_path, s, caption = self.pattern.search(line).groups()
-        self.context.output('<figure class="image">', newline=True)
+        self.context.output(
+            self.build_tag(
+                tag_name='figure',
+                attributes={'class': 'image'}),
+            newline=True)
         self.context.indent()
-        self.context.output(f'<img src="{img_path}" />', newline=True)
+        self.context.output(
+            self.build_tag(
+                tag_name='img',
+                attributes={'src': img_path},
+                empty_element=True),
+            newline=True)
         if caption:
-            self.context.output('<figcaption>', newline=True)
+            self.context.output(
+                self.build_tag(tag_name='figcaption'),
+                newline=True)
             self.context.indent()
-            self.context.output(caption, newline=True)
+            self.context.output(
+                caption,
+                newline=True)
             self.context.dedent()
-            self.context.output('</figcaption>', newline=True)
+            self.context.output(
+                self.build_tag(
+                    tag_name='figcaption',
+                    close=True),
+                newline=True)
         self.context.dedent()
-        self.context.output('</figure>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='figure', close=True),
+            newline=True)
 
 
 class BlockquoteNode(Node):
@@ -723,15 +788,23 @@ class BlockquoteNode(Node):
             self.context.output('', newline=True)
 
     def parse(self):
-        source = self.pattern.search(self.context.source.pop(0)).group(1).strip()
+        source = self.pattern.search(
+            self.context.source.pop(0)).group(1).strip()
         source_is_link = False if source[:4] != 'http' else True
-        self.context.output('<figure class="blockquote">', newline=True)
+        self.context.output(
+            self.build_tag(
+                tag_name='figure',
+                attributes={'class': 'blockquote'}))
         self.context.indent()
-        self.context.output('<blockquote', newline=True)
         if source_is_link:
-            self.context.output(f' cite="{source}">')
+            attr_ = {'cite': f'{source}'}
         else:
-            self.context.output('>')
+            attr_ = None
+        self.context.output(
+            self.build_tag(
+                tag_name='blockquote',
+                attributes=attr_),
+                newline=True)
         self.context.indent()
 
         while True:
@@ -750,18 +823,35 @@ class BlockquoteNode(Node):
             node.parse()
 
         self.context.dedent()
-        self.context.output('</blockquote>', newline=True)
-        self.context.output('<figcaption>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='blockquote',close=True),
+            newline=True)
+        self.context.output(
+            self.build_tag(tag_name='figcaption'),
+            newline=True)
         self.context.indent()
         if source_is_link:
-            cap = f'<a href="{source}">{source}</a>'
+            cap = self.build_tag(
+                tag_name='a',
+                attributes={'href': source})
+            cap += f'{source}'
+            cap += self.build_tag(
+                tag_name='a',
+                close=True)
         else:
             cap = source
         self.context.output(cap, newline=True)
         self.context.dedent()
-        self.context.output('</figcaption>', newline=True)
+        self.context.output(
+            self.build_tag(
+                tag_name='figcaption',
+                close=True))
         self.context.dedent()
-        self.context.output('</figure>', newline=True)
+        self.context.output(
+            self.build_tag(
+                tag_name='figure',
+                close=True),
+            newline=True)
         if len(self.context.source) != 0:
             self.context.source.pop(0)
 
@@ -773,10 +863,14 @@ class TableNode(Node):
         self.context = context
 
     def parse(self):
-        self.context.output('<table>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='table'),
+            newline=True)
         self.context.indent()
         while len(self.context.source) > 0 and self.pattern.search(self.context.source[0]):
-            self.context.output('<tr>', newline=True)
+            self.context.output(
+                self.build_tag(tag_name='tr'),
+                newline=True)
             self.context.indent()
             cells = self.context.source.pop(0).split('|')[1:-1]
             self.context.output('', newline=True)
@@ -786,13 +880,17 @@ class TableNode(Node):
                     tag = 'th'
                 else:
                     tag = 'td'
-                self.context.output(f'<{tag}>')
+                self.context.output(self.build_tag(tag_name=tag))
                 self.find_inline_child(c.strip('*'))
-                self.context.output(f'</{tag}>')
+                self.context.output(self.build_tag(tag_name=tag, close=True))
             self.context.dedent()
-            self.context.output('</rt>', newline=True)
+            self.context.output(
+                self.build_tag(tag_name='tr', close=True),
+                newline=True)
         self.context.dedent()
-        self.context.output('</table>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='table', close=True),
+            newline=True)
 
 
 class AnchorNode(Node):
@@ -806,13 +904,21 @@ class AnchorNode(Node):
         if text == '':
             text = url_
         text = text.strip()
-        self.context.output(f'<a href="{url_}"')
+        tag_name = 'a'
+        attr = {'href': url_}
         if url_.startswith('http'):
-            self.context.output(' class="external"')
+            attr['class'] = 'external'
         if id_:
-            self.context.output(f' id="{id_[1:]}"')
-        self.context.output('>')
-        self.context.output(f'{text}</a>')
+            attr['id'] = id_[1:]
+        self.context.output(
+            self.build_tag(
+                tag_name=tag_name,
+                attributes=attr))
+        self.context.output(text)
+        self.context.output(
+            self.build_tag(
+                tag_name=tag_name,
+                close=True))
 
 
 class IconNode(Node):
@@ -824,13 +930,19 @@ class IconNode(Node):
     def parse(self, text):
         f = self.pattern.search(text).groups()[0]
         path = self.context.icon_path
-        self.context.output(f'<img src="{path}{f}.png" />')
+        tag_name = 'img'
+        attr = {'src': f'{path}{f}.png'}
+        tag_ = self.build_tag(
+                tag_name=tag_name,
+                attributes=attr,
+                empty_element=True)
+        self.context.output(tag_)
 
 
 class AnnotationNode(Node):
     pattern = re.compile('\(\*\:([^\)]+)\)')
     id_for_symbol = 'mark_'
-    id_for_lsit = 'list_'
+    id_for_list = 'list_'
 
     def __init__(self, context):
         self.context = context
@@ -841,13 +953,20 @@ class AnnotationNode(Node):
         self.context.annotation_count += 1
         c = self.context.annotation_count
         # Put the symbol+count on output
-        href_ = f'href="#{self.id_for_lsit}{c}"'
-        id_ = f'id="{self.id_for_symbol}{c}"'
-        class_ = 'class="annotation"'
+        open_ = self.build_tag(
+            tag_name='a',
+            attributes={
+                'href': f'#{self.id_for_list}{c}',
+                'id': f'{self.id_for_symbol}{c}',
+                'class': 'annotation'
+            })
+        close_ = self.build_tag(
+            tag_name='a',close=True)
+        asterisk_ = f'※{c}'
         self.context.output(
-            f'<a {class_} {id_} {href_}">※{c}</a>')
+            f'{open_}{asterisk_}{close_}')
         # Append list test at the end of source
-        add_ = f'- <#{href_} ※{c} → #{id_}> '
+        add_ = f'- <#{self.id_for_list}{c} {asterisk_} → #{self.id_for_symbol}{c}> '
         add_ += self.pattern.search(text).groups()[0]
         self.context.source.append(add_)
 
@@ -867,7 +986,9 @@ class BreadCrumbNode(Node):
         # This method may need to be rewriten.
         #
         self.context.output(
-            f'<ol class="{self.crumbs_class}">',
+            self.build_tag(
+                tag_name='ol',
+                attributes={'class': self.crumbs_class}),
             newline=True)
         self.context.indent()
         anchor_path = ''
@@ -890,10 +1011,15 @@ class BreadCrumbNode(Node):
                     n = fp.read().split('\n')[0].strip()
             else:
                 n = p[i]
-
-            self.context.output(
-                f'<li><a href="{anchor_path}">{n}</a></li>',
-                newline=True)
+                
+            li_open = self.build_tag(tag_name='li')
+            li_close = self.build_tag(tag_name='li', close=True)
+            a_open = self.build_tag(
+                tag_name='a',
+                attributes={'href': anchor_path})
+            a_close = self.build_tag(tag_name='a', close=True)
+            line_ = li_open + a_open + n + a_close + li_close
+            self.context.output(line_, newline=True)
         else:
             name_ = (target + p[-1] + os.sep +
                         self.context.name_file)
@@ -904,12 +1030,17 @@ class BreadCrumbNode(Node):
                     title = fp.read().split('\n')[0].strip()
             else:
                 title = self.context.path.split('/')[-1]
-            self.context.output(
-                f'<li><em>{title}</em></li>',
-                newline=True)
+            li_open = self.build_tag(tag_name='li')
+            li_close = self.build_tag(tag_name='li', close=True)
+            em_open = self.build_tag(tag_name='em')
+            em_close = self.build_tag(tag_name='em', close=True)
+            line_ = li_open + em_open + title + em_close + li_close
+            self.context.output(line_, newline=True)
 
         self.context.dedent()
-        self.context.output('</ol>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='ol', close=True),
+            newline=True)
 
 
 class TocNode(Node):
@@ -918,20 +1049,31 @@ class TocNode(Node):
         pass
 
     def parse(self):
-        self.context.output('<div class="ToC">', newline=True)
+        self.context.output(
+            self.build_tag(
+                tag_name='div',
+                attributes={'class': 'ToC'}),
+            newline=True)
         self.context.indent()
-        self.context.output('<h2>Table of Contents</h2>', newline=True)
+        h2_open = self.build_tag(tag_name='h2')
+        h2_close = self.build_tag(tag_name='h2',close=True)
+        h2_text = 'Table of Contents' 
+        self.context.output(
+            h2_open + h2_text + h2_close,
+            newline=True)
         node = RootNode(self.context)
         node.parse()
         self.context.dedent()
-        self.context.output('</div>', newline=True)
+        self.context.output(
+            self.build_tag(tag_name='div', close=True),
+            newline=True)
 
 
 RootNode.child = [HeaderNode, ListNode, ImgNode, BlockquoteNode, TableNode] # or PNode
 TableNode.child = [AnchorNode, IconNode]
 BlockquoteNode.child = [ListNode, ImgNode] # or PNode
 PNode.child = [IconNode, AnnotationNode, AnchorNode] # or CDataNode
-HeaderNode.child = [] # or CDataNode
+HeaderNode.child = [AnchorNode]
 ListNode.child = [AnchorNode, IconNode] # or CDataNode
 
 
