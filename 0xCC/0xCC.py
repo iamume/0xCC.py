@@ -23,21 +23,21 @@ import PIL.Image, PIL.ExifTags
 class SiteBuilder:
     def __init__(self, setting):
         self.setting = setting
-
-    def build(self):
-        dbm = DBManager(
+        self.upload = set()
+        self.dbm = DBManager(
                 site_name=self.setting['site_name'],
                 db_file=self.setting['db_file'])
+                
+    def build(self):
         c = Crawler(
               src_root=self.setting['src_root'],
-              db_manager=dbm)
+              db_manager=self.dbm)
         im = ImageManager(self.setting['img_max_length'])
         uploader = Uploader(self.setting)
 
         files = c.crawl()
         folders = set()
         task = set()
-        upload = set()
         # DB
         for f in files:
             # ignore folders
@@ -47,15 +47,15 @@ class SiteBuilder:
             elif f.endswith(tuple(self.setting['ignore_files'])):
                 continue
             # new file
-            elif dbm.is_new(f):
+            elif self.dbm.is_new(f):
                 t_ = self.get_mtime(f)
-                dbm.add_item(f, t_, t_)
+                self.dbm.add_item(f, t_, t_)
                 task.add(f)
                 for p in self.extract_path(f):
                     folders.add(p)
             # modified file
-            elif dbm.is_modified(f, self.get_mtime(f)):
-                dbm.update_item(f, self.get_mtime(f))
+            elif self.dbm.is_modified(f, self.get_mtime(f)):
+                self.dbm.update_item(f, self.get_mtime(f))
                 task.add(f)
                 for p in self.extract_path(f):
                     folders.add(p)
@@ -64,23 +64,7 @@ class SiteBuilder:
             self.make_equivalent_folder(t)
             # compile txt
             if t.endswith('.txt'):
-                made_time = dbm.get_made_time(t)
-                ma_ = datetime.datetime.fromtimestamp(made_time)
-                made_ = ma_.strftime('%Y/%m/%d')
-
-                modified_time = dbm.get_modified_time(t)
-                mo_ = datetime.datetime.fromtimestamp(modified_time)
-                modified_ = mo_.strftime('%Y/%m/%d')
-
-                p = Publisher(self.setting['templates']['document'])
-                p.publish(
-                    src_root = self.setting['src_root'],
-                    out_root = self.setting['out_root'],
-                    target_path = t,
-                    registered_time = made_,
-                    modified_time = modified_,
-                    title_prefix = self.setting['site_name'] + ' - ')
-                upload.add(t[:-3] + 'html')
+                self.txt_to_html(t)
             else:
                 # copy others
                 self.make_out_dir(t)
@@ -94,9 +78,34 @@ class SiteBuilder:
                         dirname = os.path.dirname(t)
                         filename = '.' + os.path.basename(t)[1:]
                         t = dirname + os.sep + filename
-                upload.add(t)
+                self.upload.add(t)
 
         # generate index file
+        self.generate_index(folders)
+
+        for item in self.upload:
+            uploader.mirroring_file(item)
+    
+    def txt_to_html(self, path):
+        made_time = self.dbm.get_made_time(path)
+        ma_ = datetime.datetime.fromtimestamp(made_time)
+        made_ = ma_.strftime('%Y/%m/%d')
+
+        modified_time = self.dbm.get_modified_time(path)
+        mo_ = datetime.datetime.fromtimestamp(modified_time)
+        modified_ = mo_.strftime('%Y/%m/%d')
+
+        p = Publisher(self.setting['templates']['document'])
+        p.publish(
+            src_root = self.setting['src_root'],
+            out_root = self.setting['out_root'],
+            target_path = path,
+            registered_time = made_,
+            modified_time = modified_,
+            title_prefix = self.setting['site_name'] + ' - ')
+        self.upload.add(path[:-3] + 'html')
+    
+    def generate_index(self, folders):
         for f in folders:
             p = Publisher(self.setting['templates']['index'])
             p.publish(
@@ -106,11 +115,8 @@ class SiteBuilder:
                 registered_time = '-',
                 modified_time = '-',
                 title_prefix = self.setting['site_name'] + ' - ')
-            upload.add(f + '/index.html')
-
-        for item in upload:
-            uploader.mirroring_file(item)
-            
+            self.upload.add(f + '/index.html')
+        
     def make_out_dir(self, path):
         tmp = self.setting['out_root'] + os.sep
         for folder in path.split('/')[:-1]:
@@ -1021,6 +1027,7 @@ class BreadCrumbNode(Node):
             line_ = li_open + a_open + n + a_close + li_close
             self.context.output(line_, newline=True)
         else:
+            # lase LI element
             name_ = (target + p[-1] + os.sep +
                         self.context.name_file)
             if self.context.text:
