@@ -1,9 +1,3 @@
-#!python3
-
-#
-# 0xCC ver 0.1
-#
-
 import datetime
 import ftplib
 import json
@@ -15,6 +9,8 @@ import string
 import sqlite3
 import sys
 
+from itertools import chain
+
 import PIL.Image, PIL.ExifTags
 
 #
@@ -23,165 +19,188 @@ import PIL.Image, PIL.ExifTags
 class SiteBuilder:
     def __init__(self, setting):
         self.setting = setting
-        self.upload = set()
+        self.upload_entry = set()
         self.dbm = DBManager(
-                site_name=self.setting['site_name'],
-                db_file=self.setting['db_file'])
-                
+                setting)
+                #site_name=setting['site_name'],
+                #db_file=setting['db_file'])
+        self.im = ImageManager(setting['img_max_length'])
+        self.uploader = Uploader(setting)
+    
     def build(self):
-        c = Crawler(
-              src_root=self.setting['src_root'],
-              db_manager=self.dbm)
-        im = ImageManager(self.setting['img_max_length'])
-        uploader = Uploader(self.setting)
+        src_root = self.setting['src_root']
+        cut_ = len(str(pathlib.Path(src_root)))
+        ignore_ = tuple(self.setting['ignore_files'])
+        files_to_upload = []
+        
+        # gether files
+        everything = map(lambda x:
+                            str(x)[cut_:],
+                            pathlib.Path(src_root).glob('**/*'))
+        files = list(filter(lambda x:
+                        not os.path.isdir(src_root + x)
+                        and not x.endswith(ignore_),
+                        everything))
 
-        files = c.crawl()
-        folders = set()
-        task = set()
-        # DB
-        for f in files:
-            # ignore folders
-            if os.path.isdir(self.setting['src_root'] + f):
-                continue
-            # ignore
-            elif f.endswith(tuple(self.setting['ignore_files'])):
-                continue
-            # new file
-            elif self.dbm.is_new(f):
-                t_ = self.get_mtime(f)
-                self.dbm.add_item(f, t_, t_)
-                task.add(f)
-                for p in self.extract_path(f):
-                    folders.add(p)
-            # modified file
-            elif self.dbm.is_modified(f, self.get_mtime(f)):
-                self.dbm.update_item(f, self.get_mtime(f))
-                task.add(f)
-                for p in self.extract_path(f):
-                    folders.add(p)
+        # add data of new file
+        new_files = list(filter(lambda x:
+                            self.dbm.is_new(x),
+                            files))
+        self.register_to_db(new_files)
+        
+        # update data of modified file        
+        mod_files = list(filter(lambda x:
+                            self.dbm.is_modified(x),
+                            files))
+        self.update_db(mod_files)
+        
+        # files to be done some process
+        jobs = new_files + mod_files 
+        
+        # make symmetrial dir in output
+        self.make_symmetrical_dirs(jobs)    
+        
+        # txt(srcdir) -> html(outdir)
+        files_to_compile = list(filter(lambda x:
+                                    x.endswith('.txt'),
+                                    jobs))
+        files_to_upload += self.txt2html(files_to_compile)
+        
+        # resize and copy jpg files from secdir to outdir
+        jpg_files = list(filter(lambda x:
+                                x.endswith(('jpg', '.jpeg')),
+                                jobs))
+        files_to_upload += self.optimize_jpgs(jpg_files)
+        
+        # copy misc files from srcdir to outdir
+        files_to_copy = filter(lambda x:
+                                not (x.endswith('.txt') or
+                                 x.endswith(('jpg', 'jpeg'))),
+                                jobs)
+        files_to_upload += list(self.copy_to_out_dir(files_to_copy))
+        
+        # list up dirs those need new index
+        modified_dirs = list(chain.from_iterable(
+                                    map(self.extract_path,
+                                    jobs)))
+        files_to_upload += list(self.update_indexies(modified_dirs))
+        
+        files_to_upload = set(files_to_upload)
+        # upload them
+        self.update_site(files_to_upload)
+    
+    def register_to_db(self, files):
+        for file in files:
+            mtime = self.get_mtime(file)
+            self.dbm.add_item(file, mtime, mtime)
+    
+    def update_db(self, files):
+        for file in files:
+            mtime = self.get_mtime(file)
+            self.dbm.update_item(file, mtime)
+                
+    # make html from text files
+    def txt2html(self, files):
+        result = []
+        for file in files:
+            reg_time = self.dbm.get_made_time(file)
+            dt_ = datetime.datetime.fromtimestamp(reg_time)
+            registered_ = dt_.strftime('%Y/%m/%d')
+    
+            mod_time = self.dbm.get_modified_time(file)
+            dt_ = datetime.datetime.fromtimestamp(mod_time)
+            modified_ = dt_.strftime('%Y/%m/%d')
+    
+            p = Publisher(self.setting['templates']['document'])
+            output_file = p.publish(
+                src_root = self.setting['src_root'],
+                out_root = self.setting['out_root'],
+                target_path = file,
+                registered_time = registered_,
+                modified_time = modified_,
+                title_prefix = self.setting['site_name'] + ' - ')
+            
+            result.append(output_file)
+        return result
+    
+    # shrink too large jpg
+    def optimize_jpgs(self, files):
+        result = []
+        for file in files:
+            self.im.do_resize(
+                self.setting['src_root'] + file,
+                self.setting['out_root'] + file)
+            result.append(file)
+        return result
 
-        for t in task:
-            self.make_equivalent_folder(t)
-            # compile txt
-            if t.endswith('.txt'):
-                self.txt_to_html(t)
+    # copy misc files
+    def copy_to_out_dir(self, files):
+        result = []
+        for file in files:
+            from_ = file
+            if os.path.basename(file)[0] == '_':
+                d_ = os.path.dirname(file) + os.sep
+                n_ = '.' + os.path.basename[1:]
+                to_path = d_ + n_
             else:
-                # copy others
-                self.make_out_dir(t)
-                if t.endswith(('.jpg', '.jpeg')):
-                    im.do_resize(
-                        self.setting['src_root'] + t,
-                        self.setting['out_root'] + t)
-                else:
-                    self.copy_to_out_dir(t)
-                    if os.path.basename(t).startswith('_'):
-                        dirname = os.path.dirname(t)
-                        filename = '.' + os.path.basename(t)[1:]
-                        t = dirname + os.sep + filename
-                self.upload.add(t)
-
-        # generate index file
-        self.generate_index(folders)
-
-        for item in self.upload:
-            uploader.mirroring_file(item)
+                to_ = file
+            shutil.copy2(
+                self.setting['src_root'] + from_,
+                self.setting['out_root'] + to_)
+            result.append(to_)
+        return result
     
-    def txt_to_html(self, path):
-        made_time = self.dbm.get_made_time(path)
-        ma_ = datetime.datetime.fromtimestamp(made_time)
-        made_ = ma_.strftime('%Y/%m/%d')
-
-        modified_time = self.dbm.get_modified_time(path)
-        mo_ = datetime.datetime.fromtimestamp(modified_time)
-        modified_ = mo_.strftime('%Y/%m/%d')
-
-        p = Publisher(self.setting['templates']['document'])
-        p.publish(
-            src_root = self.setting['src_root'],
-            out_root = self.setting['out_root'],
-            target_path = path,
-            registered_time = made_,
-            modified_time = modified_,
-            title_prefix = self.setting['site_name'] + ' - ')
-        self.upload.add(path[:-3] + 'html')
-    
-    def generate_index(self, folders):
-        for f in folders:
+    # generate index file
+    def update_indexies(self, files):
+        result = []
+        for file in files:
             p = Publisher(self.setting['templates']['index'])
             p.publish(
                 src_root = self.setting['src_root'],
                 out_root = self.setting['out_root'],
-                target_path = f,
+                target_path = file,
                 registered_time = '-',
                 modified_time = '-',
                 title_prefix = self.setting['site_name'] + ' - ')
-            self.upload.add(f + '/index.html')
-        
-    def make_out_dir(self, path):
-        tmp = self.setting['out_root'] + os.sep
-        for folder in path.split('/')[:-1]:
-            if not os.path.exists(tmp + folder):
-                os.mkdir(tmp + folder)
-            tmp += folder + os.sep
+            result.append(file + os.sep + 'index.html')
+        return result
+    
+    def update_site(self, files):
+        for file in files:
+            self.uploader.mirroring_file(file)
             
-    def copy_to_out_dir(self, path):
-        from_path = path
-        if os.path.basename(path)[0] == '_':
-            d_ = os.path.dirname(path) + os.sep
-            n_ = '.' + os.path.basename[1:]
-            to_path = d_ + n_
-        else:
-            to_path = path
-        shutil.copy2(
-            self.setting['src_root'] + from_path,
-            self.setting['out_root'] + to_path)
-
+    # list up all paths from root to given path
     def extract_path(self, path):
-        folders = set()
-        tmp_f = path
-        level = os.path.dirname(tmp_f).count(os.sep)
-        
-        for i in range(level):
-            tmp_f = tmp_f[:tmp_f.rfind(os.sep)]
-            folders.add(tmp_f)
-        folders.add('/')
-        return folders
-
+        path = path.strip(os.sep)
+        result = ['']
+        tmp = '/'
+        for p in path.split(os.sep)[:-1]:
+            tmp += p
+            result.append(tmp)
+            tmp += os.sep
+        return result        
+    
     def get_mtime(self, path):
         return os.stat(self.setting['src_root'] + path).st_mtime
-
-    def make_equivalent_folder(self, path):
+    
+    def make_symmetrical_dirs(self, dirs):
         # make dir in outdir (if its does not exists)
-        tmp = self.setting['out_root'] + os.sep
-        for p in path.split(os.sep)[:-1]:
-            if not os.path.exists(tmp + p):
-                os.mkdir(tmp + p)
-            tmp += p + os.sep
-
-
-#
-# Crawler
-#
-class Crawler:
-    def __init__(self, src_root, db_manager):
-        self.src_root = src_root
-        self.db_manager = db_manager
-
-    def crawl(self):
-        files = list(pathlib.Path(self.src_root).glob('**/*'))
-        cut = len(str(pathlib.Path(self.src_root)))
-        return list(map(lambda x: str(x)[cut:], files))
-
+        base_path = self.setting['out_root'] + os.sep
+        for d in dirs:
+            path_ = d[:d.rfind(os.sep)]
+            if not os.path.exists(base_path + path_):
+                os.makedirs(base_path + path_)
 
 #
 # SQLite3
 #
 class DBManager:
-    def __init__(self, site_name, db_file='site_db.sq3'):
-        self.db_file = db_file
+    def __init__(self, setting):
+        self.db_file = setting['db_file']
         self.connection = sqlite3.connect(self.db_file)
         self.cursor = self.connection.cursor()
-        self.site_name = site_name
+        self.site_name = setting['site_name']
+        self.src_root = setting['src_root']
         try:
             self.cursor.execute(f'CREATE TABLE [{site_name}] (path text, made integer, modified integer);')
         except:
@@ -193,7 +212,8 @@ class DBManager:
         res = self.cursor.fetchall()
         return True if len(res) == 0 else False
 
-    def is_modified(self, path, mtime):
+    def is_modified(self, path):
+        mtime = os.stat(self.src_root + path).st_mtime
         query = f'SELECT * FROM [{self.site_name}] WHERE path="{path}";'
         self.cursor.execute(query)
         res = self.cursor.fetchone()
@@ -289,11 +309,14 @@ class Publisher:
         # detect output path
         if out_name == 'index.html':
             path_ = out_root + target_path + os.sep + out_name
+            result = target_path + os.sep + out_name
         else:
             path_ = out_root + target_path[:-3] + 'html'
+            result = target_path[:-3] + 'html'
 
         with open(path_, mode='w', encoding='utf-8') as fp:
             fp.write(out)
+        return result
 
 
 class ImageManager:
@@ -1101,4 +1124,3 @@ if __name__ == '__main__':
     setting = json.loads(json_)
     sb = SiteBuilder(setting)
     sb.build()
-
