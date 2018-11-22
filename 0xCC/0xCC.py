@@ -125,12 +125,11 @@ class SiteBuilder:
     
     # shrink too large jpg
     def optimize_jpgs(self, files):
-        result = []
-        for file in files:
-            self.im.do_resize(
-                self.setting['src_root'] + file,
-                self.setting['out_root'] + file)
-            result.append(file)
+        result = list(filter(lambda x: 
+                            self.im.do_resize(
+                                self.setting['src_root'] + x,
+                                self.setting['out_root'] + x),
+                            files))
         return result
 
     # copy misc files
@@ -141,7 +140,7 @@ class SiteBuilder:
             if os.path.basename(file)[0] == '_':
                 d_ = os.path.dirname(file) + os.sep
                 n_ = '.' + os.path.basename[1:]
-                to_path = d_ + n_
+                to_ = d_ + n_
             else:
                 to_ = file
             shutil.copy2(
@@ -397,6 +396,7 @@ class ImageManager:
         with PIL.Image.new(self.img.mode, self.img.size) as out_img:
             out_img.putdata(self.img.getdata())
             out_img.save(out_path)
+        return True
 
 
 #
@@ -507,15 +507,16 @@ class ContextManager:
         if path == None:
             path = '/'
         allitems = os.listdir(self.src_root + path)
-        folders = []
-        files = []
-        for item in allitems:
-            if os.path.isdir(self.src_root + path + os.sep + item):
-                folders.append(item)
-            else:
-                files.append(item)
-        folders.sort()
-        files.sort()
+        path_to_item = self.src_root + path + os.sep
+        
+        folders = sorted(
+                    filter(lambda x:
+                            os.path.isdir(path_to_item + x),
+                            allitems))
+        files = sorted(
+                    filter(lambda x:
+                            os.path.isfile(path_to_item + x),
+                            allitems))
         s = []
         p = self.path if self.path != '/' else ''
         s.append(f'# Index of {p}{os.sep}')
