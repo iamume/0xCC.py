@@ -22,8 +22,6 @@ class SiteBuilder:
         self.upload_entry = set()
         self.dbm = DBManager(
                 setting)
-                #site_name=setting['site_name'],
-                #db_file=setting['db_file'])
         self.im = ImageManager(setting['img_max_length'])
         self.uploader = Uploader(setting)
     
@@ -86,6 +84,7 @@ class SiteBuilder:
         files_to_upload += list(self.update_indexies(modified_dirs))
         
         files_to_upload = set(files_to_upload)
+        
         # upload them
         self.update_site(files_to_upload)
     
@@ -134,21 +133,24 @@ class SiteBuilder:
 
     # copy misc files
     def copy_to_out_dir(self, files):
-        result = []
-        for file in files:
-            from_ = file
-            if os.path.basename(file)[0] == '_':
-                d_ = os.path.dirname(file) + os.sep
-                n_ = '.' + os.path.basename[1:]
-                to_ = d_ + n_
-            else:
-                to_ = file
-            shutil.copy2(
-                self.setting['src_root'] + from_,
-                self.setting['out_root'] + to_)
-            result.append(to_)
-        return result
+        from_ = list(files)
+        to_ = list(map(self.__check_name__, from_))
+        do_ = list(map(lambda x, y:
+                        shutil.copy2(
+                            self.setting['src_root'] + x,
+                              self.setting['out_root'] + y),
+                        from_, to_))
+        return to_
     
+    def __check_name__(self, file):
+        if os.path.basename(file)[0] == '_':
+            path_ = os.path.dirname(file) + os.sep
+            name_ = '.' + os.path.basename(file)[1:]
+            to_ = path_ + name_
+        else:
+            to_ = file
+        return to_
+        
     # generate index file
     def update_indexies(self, files):
         result = []
@@ -266,10 +268,17 @@ class Publisher:
             t_ = src_root + target_path
             with open(t_, encoding='utf-8') as fp:
                 text = fp.read()
-            con = ContextManager(text=text, path=target_path, indent_str=indent_str, indent_level=indent_level)
+            con = ContextManager(
+                        text=text,
+                        path=target_path,
+                        indent_str=indent_str,
+                        indent_level=indent_level)
             out_name = target_path.split('/')[-1][:-3] + '.html'
         else:
-            con = ContextManager(path=target_path, indent_str=indent_str, indent_level=indent_level)
+            con = ContextManager(
+                        path=target_path,
+                        indent_str=indent_str,
+                        indent_level=indent_level)
             out_name = 'index.html'
         node = RootNode(con)
         node.parse()
