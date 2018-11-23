@@ -71,10 +71,10 @@ class SiteBuilder:
         files_to_upload += self.optimize_jpgs(jpg_files)
         
         # copy misc files from srcdir to outdir
-        files_to_copy = filter(lambda x:
+        files_to_copy = list(filter(lambda x:
                                 not (x.endswith('.txt') or
                                  x.endswith(('jpg', 'jpeg'))),
-                                jobs)
+                                jobs))
         files_to_upload += list(self.copy_to_out_dir(files_to_copy))
         
         # list up dirs those need new index
@@ -133,7 +133,7 @@ class SiteBuilder:
 
     # copy misc files
     def copy_to_out_dir(self, files):
-        from_ = list(files)
+        from_ = files
         to_ = list(map(self.__check_name__, from_))
         do_ = list(map(lambda x, y:
                         shutil.copy2(
