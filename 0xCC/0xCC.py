@@ -100,6 +100,7 @@ class SiteBuilder:
                 
     # make html from text files
     def txt2html(self, files):
+        template = self.setting['templates']['document']
         reg_time = list(map(lambda x:
                             self.__get_YYYYMMDD_from_timestamp(
                                     self.dbm.get_made_time(x)),
@@ -109,7 +110,7 @@ class SiteBuilder:
                                     self.dbm.get_modified_time(x)),
                             files))
         result = list(map(lambda x, y, z:
-                            self.__call_publisher(x,y,z),
+                            self.__call_publisher(x, y, z, template),
                             files,
                             reg_time,
                             mod_time))
@@ -146,19 +147,23 @@ class SiteBuilder:
         
     # generate index file
     def update_indexies(self, files):
+        template = self.setting['templates']['index']
         result = list(map(lambda x:
-                            self.__call_publisher(x),
+                            self.__call_publisher(x, '-', '-', template),
                             files))
         return result
         
-    def __call_publisher(self, file, reg_time='-', mod_time='-'):
-        p = Publisher(self.setting['templates']['index'])
+    def __call_publisher(   self,
+                            file,
+                            reg_time='-', mod_time='-',
+                            template=''):
+        p = Publisher(template)
         result = p.publish(
             src_root = self.setting['src_root'],
             out_root = self.setting['out_root'],
             target_path = file,
-            registered_time = '-',
-            modified_time = '-',
+            registered_time = reg_time,
+            modified_time = mod_time,
             title_prefix = self.setting['site_name'] + ' - ')
         return result
     
