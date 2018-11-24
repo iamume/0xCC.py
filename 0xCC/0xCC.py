@@ -32,9 +32,9 @@ class SiteBuilder:
         files_to_upload = []
         
         # gether files
-        everything = map(lambda x:
+        everything = list(map(lambda x:
                             str(x)[cut_:],
-                            pathlib.Path(src_root).glob('**/*'))
+                            pathlib.Path(src_root).glob('**/*')))
         files = list(filter(lambda x:
                         not os.path.isdir(src_root + x)
                         and not x.endswith(ignore_),
@@ -100,26 +100,19 @@ class SiteBuilder:
                 
     # make html from text files
     def txt2html(self, files):
-        result = []
-        for file in files:
-            reg_time = self.dbm.get_made_time(file)
-            dt_ = datetime.datetime.fromtimestamp(reg_time)
-            registered_ = dt_.strftime('%Y/%m/%d')
-    
-            mod_time = self.dbm.get_modified_time(file)
-            dt_ = datetime.datetime.fromtimestamp(mod_time)
-            modified_ = dt_.strftime('%Y/%m/%d')
-    
-            p = Publisher(self.setting['templates']['document'])
-            output_file = p.publish(
-                src_root = self.setting['src_root'],
-                out_root = self.setting['out_root'],
-                target_path = file,
-                registered_time = registered_,
-                modified_time = modified_,
-                title_prefix = self.setting['site_name'] + ' - ')
-            
-            result.append(output_file)
+        reg_time = list(map(lambda x:
+                            self.__get_YYYYMMDD_from_timestamp(
+                                    self.dbm.get_made_time(x)),
+                            files))
+        mod_time = list(map(lambda x:
+                            self.__get_YYYYMMDD_from_timestamp(
+                                    self.dbm.get_modified_time(x)),
+                            files))
+        result = list(map(lambda x, y, z:
+                            self.__call_publisher(x,y,z),
+                            files,
+                            reg_time,
+                            mod_time))
         return result
     
     # shrink too large jpg
@@ -138,7 +131,7 @@ class SiteBuilder:
         do_ = list(map(lambda x, y:
                         shutil.copy2(
                             self.setting['src_root'] + x,
-                              self.setting['out_root'] + y),
+                            self.setting['out_root'] + y),
                         from_, to_))
         return to_
     
@@ -153,19 +146,26 @@ class SiteBuilder:
         
     # generate index file
     def update_indexies(self, files):
-        result = []
-        for file in files:
-            p = Publisher(self.setting['templates']['index'])
-            p.publish(
-                src_root = self.setting['src_root'],
-                out_root = self.setting['out_root'],
-                target_path = file,
-                registered_time = '-',
-                modified_time = '-',
-                title_prefix = self.setting['site_name'] + ' - ')
-            result.append(file + os.sep + 'index.html')
+        result = list(map(lambda x:
+                            self.__call_publisher(x),
+                            files))
+        return result
+        
+    def __call_publisher(self, file, reg_time='-', mod_time='-'):
+        p = Publisher(self.setting['templates']['index'])
+        result = p.publish(
+            src_root = self.setting['src_root'],
+            out_root = self.setting['out_root'],
+            target_path = file,
+            registered_time = '-',
+            modified_time = '-',
+            title_prefix = self.setting['site_name'] + ' - ')
         return result
     
+    def __get_YYYYMMDD_from_timestamp(self, timestamp):
+        dt_ = datetime.datetime.fromtimestamp(timestamp)
+        return dt_.strftime('%Y/%m/%d')
+        
     def update_site(self, files):
         for file in files:
             self.uploader.mirroring_file(file)
