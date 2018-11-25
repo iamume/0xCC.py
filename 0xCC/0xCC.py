@@ -10,6 +10,7 @@ import sqlite3
 import sys
 
 from itertools import chain
+from functools import reduce
 
 import PIL.Image, PIL.ExifTags
 
@@ -33,23 +34,23 @@ class SiteBuilder:
         
         # gether files
         everything = list(map(lambda x:
-                            str(x)[cut_:],
-                            pathlib.Path(src_root).glob('**/*')))
+                                str(x)[cut_:],
+                                pathlib.Path(src_root).glob('**/*')))
         files = list(filter(lambda x:
-                        not os.path.isdir(src_root + x)
-                        and not x.endswith(ignore_),
-                        everything))
+                                not os.path.isdir(src_root + x)
+                                and not x.endswith(ignore_),
+                                everything))
 
         # add data of new file
         new_files = list(filter(lambda x:
-                            self.dbm.is_new(x),
-                            files))
+                                    self.dbm.is_new(x),
+                                    files))
         self.register_to_db(new_files)
         
         # update data of modified file        
         mod_files = list(filter(lambda x:
-                            self.dbm.is_modified(x),
-                            files))
+                                    self.dbm.is_modified(x),
+                                    files))
         self.update_db(mod_files)
         
         # files to be done some process
@@ -60,27 +61,26 @@ class SiteBuilder:
         
         # txt(srcdir) -> html(outdir)
         files_to_compile = list(filter(lambda x:
-                                    x.endswith('.txt'),
-                                    jobs))
+                                            x.endswith('.txt'),
+                                            jobs))
         files_to_upload += self.txt2html(files_to_compile)
         
         # resize and copy jpg files from secdir to outdir
         jpg_files = list(filter(lambda x:
-                                x.endswith(('jpg', '.jpeg')),
-                                jobs))
+                                    x.endswith(('jpg', '.jpeg')),
+                                    jobs))
         files_to_upload += self.optimize_jpgs(jpg_files)
         
         # copy misc files from srcdir to outdir
         files_to_copy = list(filter(lambda x:
-                                not (x.endswith('.txt') or
-                                 x.endswith(('jpg', 'jpeg'))),
-                                jobs))
+                                    not (x.endswith('.txt') or
+                                        x.endswith(('jpg', 'jpeg'))),
+                                    jobs))
         files_to_upload += list(self.copy_to_out_dir(files_to_copy))
         
         # list up dirs those need new index
         modified_dirs = list(chain.from_iterable(
-                                    map(self.extract_path,
-                                    jobs)))
+                                    map(self.extract_path,jobs)))
         files_to_upload += list(self.update_indexies(modified_dirs))
         
         files_to_upload = set(files_to_upload)
@@ -177,14 +177,10 @@ class SiteBuilder:
             
     # list up all paths from root to given path
     def extract_path(self, path):
-        path = path.strip(os.sep)
-        result = ['']
-        tmp = '/'
-        for p in path.split(os.sep)[:-1]:
-            tmp += p
-            result.append(tmp)
-            tmp += os.sep
-        return result        
+        return list(reduce(lambda x, y:
+                            x.append(x[-1]+os.sep+y) or x,
+                            path.split(os.sep),
+                            ['']))
     
     def get_mtime(self, path):
         return os.stat(self.setting['src_root'] + path).st_mtime
