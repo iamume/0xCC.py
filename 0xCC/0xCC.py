@@ -529,49 +529,68 @@ class ContextManager:
                             allitems))
         files = sorted(
                     filter(lambda x:
-                            os.path.isfile(path_to_item + x),
+                            os.path.isfile(path_to_item + x) and x != self.name_file,
                             allitems))
-        s = []
         p = self.path if self.path != '/' else ''
-        s.append(f'# Index of {p}{os.sep}')
-        s.append('|*Name (or title)*|*Last modified*|*Size*|')
-
-        for f in folders:
-            t_ = os.sep.join([path, f, self.name_file])
-            n = self.src_root + t_
-            if os.path.exists(n):
-                with open(n, encoding='utf-8') as fp:
-                    title = fp.read().split('\n')[0].strip()
-            else:
-                title = f
-            lm = self.mtime_(self.src_root + path + os.sep + f)
-            s.append(f'|<icon folder> <{title} → ./{f}>|{lm}|-|')
-
-        for f in files:
-            if f == self.name_file:
-                continue
-            if len(f) > 4 and f[-4:] == '.txt':
-                title = f[:-4] + '.html'
-                target_ = self.src_root + path + os.sep + f
-                with open(target_, encoding='utf-8') as fp:
-                    lines = fp.read().split('\n')
-                for l in lines:
-                    if HeaderNode.pattern.search(l):
-                        match_ = HeaderNode.pattern.search(l)
-                        title = match_.groups()[1]
-                        break
-            else:
-                title = f
-            if f.endswith('.txt'):
-                size = self.size_(self.out_root + path + os.sep + f[:-3] + 'html')
-            else:
-                size = self.size_(self.out_root + path + os.sep + f)
-            lm = self.mtime_(self.src_root + path + os.sep + f)
-            url = f[:-3] + 'html' if f[-4:] == '.txt' else f
-            ext = os.path.splitext(url)[-1][1:]
-            s.append(f'|<icon {ext}> <{title} → ./{url}>|{lm}|{size}|')
+        s = [
+            f'# Index of {p}{os.sep}',
+            '|*Name (or title)*|*Last modified*|*Size*|']
+        s += list(map(lambda x:
+                        self.__get_tr(path, x),
+                        folders + files))
         return s
-
+        
+    def __get_tr(self, path, target):
+        out_path = self.out_root + path + os.sep
+        src_path = self.src_root + path + os.sep
+        if os.path.isdir(src_path + target):
+            title = self.__get_title_of_folder(path, target)
+            ext = 'folder'
+            url = target
+            lm = self.mtime_(src_path + target)
+            size = '-'
+        elif target.endswith('.txt'):
+            title = self.__get_title_from_txt(path, target)
+            ext = 'html'
+            url = target[:-3] + 'html'
+            lm = self.mtime_(src_path + target)
+            size = self.size_(out_path + target[:-3] + ext)
+        else:
+            title = target
+            ext = os.path.splitext(target)[-1][1:]
+            url = target
+            lm = self.mtime_(src_path + target)
+            size = self.size_(out_path + target)
+        return f'|<icon {ext}> <{title} → ./{url}>|{lm}|{size}|'
+        
+        
+    
+    def __get_title_from_txt(self, path, target):
+        file_ = self.src_root + path + os.sep + target
+        with open(file_, encoding='utf-8') as fp:
+            lines = fp.read().split('\n')
+        title_line = filter(lambda x:
+                                HeaderNode.pattern.search(x),
+                                lines)
+        try:
+            title = HeaderNode.pattern.match(
+                        next(title_line)).groups()[1]
+        except StopIteration:
+            title = target[:-3] + 'html'
+        return title
+    
+    def __get_title_of_folder(self, path, target):
+        path_to_name_file = os.sep.join([   path,
+                                            target,
+                                            self.name_file])
+        name_file = self.src_root + path_to_name_file
+        if os.path.exists(name_file):
+            with open(name_file, encoding='utf-8') as fp:
+                title = fp.read().split('\n')[0].strip()
+        else:
+            title = target
+        return title
+        
     def mtime_(self, path):
         mtime = os.stat(path).st_mtime
         dt = datetime.datetime.fromtimestamp(mtime)
