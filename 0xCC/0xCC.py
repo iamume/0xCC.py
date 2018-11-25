@@ -178,9 +178,11 @@ class SiteBuilder:
     # list up all paths from root to given path
     def extract_path(self, path):
         return list(reduce(lambda x, y:
-                            x.append(x[-1]+os.sep+y) or x,
-                            path.split(os.sep),
-                            ['']))
+                            x.append(
+                                (x[-1]+os.sep+y).replace('//','/')
+                            ) or x,
+                            path.split(os.sep)[:-1],
+                            ['/']))[1:]
     
     def get_mtime(self, path):
         return os.stat(self.setting['src_root'] + path).st_mtime
