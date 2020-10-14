@@ -1156,3 +1156,7 @@ if __name__ == '__main__':
     setting = json.loads(json_)
     sb = SiteBuilder(setting)
     sb.build()
+
+# test comment
+# This is a test comment from Editor of Github Codespaces.
+# Hello, World!
