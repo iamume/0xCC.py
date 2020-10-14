@@ -35,3 +35,5 @@ img:res/nikki/2018/10/001.jpg
     - listlist
     - listlist
 >
+
+日本語をダラダラ書く。書いたよ。
